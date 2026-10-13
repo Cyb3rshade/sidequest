@@ -958,11 +958,18 @@ function shareParams(withTips){
   if(state.subs.size) p.set('u', [...state.subs].join(','));
   if(state.extras.size) p.set('x', [...state.extras].join(','));
   if(state.kw) p.set('k', state.kw);
+  if(state.route && state.maxOff < state.route.radius) p.set('o', Math.round(state.maxOff) / 1000);
   if(withTips){ const ids = Object.keys(state.favs).filter(id => state.byId.has(id)).slice(0, 40); if(ids.length) p.set('t', ids.join(',')); }
   if(state.tour.length) p.set('w', state.tour.join(','));
   return p;
 }
-const syncHash = () => history.replaceState(null, '', '#' + shareParams(false).toString());
+// Letzte Route merken: Wer die App versehentlich schließt (oder kurz in eine andere App wechselt), findet seine Route beim Zurückkommen wieder.
+// Gespeichert wird nur die Anfrage (Orte, Filter, Tour), nicht das Ergebnis. Die Route wird beim Start neu berechnet, die Daten kommen aus dem Cache.
+const LAST_KEY = 'af-last', LAST_HOURS = 12;
+function saveLast(){ if(state.route) store.set(LAST_KEY, {t: Date.now(), h: shareParams(false).toString()}); }
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'hidden') saveLast(); });
+addEventListener('pagehide', saveLast);
+const syncHash = () => { history.replaceState(null, '', '#' + shareParams(false).toString()); saveLast(); };
 function readHash(){
   const p = new URLSearchParams(location.hash.slice(1)); if(!p.get('s')) return false;
   state.stops = p.get('s').split('|');
@@ -973,6 +980,7 @@ function readHash(){
   if(p.has('u')) state.subs = new Set(p.get('u').split(','));
   if(p.has('x')) state.extras = new Set(p.get('x').split(','));
   if(p.has('k')) state.kw = p.get('k');
+  const o = +p.get('o'); if(o >= 0.5 && o * 1000 < state.radius) state.maxOff = o * 1000;
   if(p.has('t')) state.tips = new Set(p.get('t').split(','));
   if(p.has('w')) state.pendingTour = p.get('w').split(',');
   return true;
@@ -1020,8 +1028,14 @@ document.addEventListener('click', e => {
     state.mains = new Set(state.MAIN.filter(m => m.on).map(m => m.id));
   }catch(e){ $('listSub').textContent = 'App-Dateien konnten nicht geladen werden. Läuft die Seite über eine Webadresse?'; return; }
   applyTheme();
-  const fromLink = readHash();
+  let fromLink = readHash(), restored = false;
+  if(!fromLink){   // kein Link: die letzte Route wiederherstellen, wenn sie noch frisch ist
+    const last = store.get(LAST_KEY, null);
+    if(last?.h && Date.now() - last.t < LAST_HOURS * 3600e3){ history.replaceState(null, '', '#' + last.h); fromLink = restored = readHash(); }
+    else if(last) store.set(LAST_KEY, null);
+  }
   renderStops(); render(); setPanel(isNarrow() ? 'peek' : 'half');
+  if(restored) toast('Deine letzte Route wird wiederhergestellt …');
   if(fromLink) search(); else openSheet('routeSheet');
   if('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
