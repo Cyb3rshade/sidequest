@@ -39,6 +39,7 @@ jobs:
       - name: Dateien prüfen
         run: |
           node -e "JSON.parse(require('fs').readFileSync('web/manifest.webmanifest','utf8'))"
+          node -e "const c=JSON.parse(require('fs').readFileSync('web/changelog.json','utf8'));if(!Array.isArray(c)||c.some(e=>!e.id||!e.title||!Array.isArray(e.items)||!e.items.length)){console.error('changelog.json: id, title und items fehlen');process.exit(1)}console.log(c.length+' Changelog-Einträge')"
           node -e "const c=JSON.parse(require('fs').readFileSync('web/categories.json','utf8'));if(!c.main||!c.main.length)process.exit(1);const ids=new Set();for(const m of c.main){if(!m.id||!m.label||!m.subs||!m.subs.length){console.error('Oberkategorie unvollständig: '+m.id);process.exit(1)}for(const s of m.subs){if(!s.id||ids.has(s.id)){console.error('Doppelte oder fehlende Unterkategorie-ID: '+s.id);process.exit(1)}ids.add(s.id)}}console.log(c.main.length+' Oberkategorien, '+ids.size+' Unterkategorien')"
           node --check web/app.js
           node --check web/sw.js
@@ -106,7 +107,8 @@ jobs:
           VERSION="$(date -u +%Y.%m.%d)-${GITHUB_RUN_NUMBER}"
           mkdir _site
           cp -r web/. _site/
-          sed -i "s/__BUILD__/${VERSION}/g" _site/sw.js
+          sed -i "s/__BUILD__/${VERSION}/g" _site/sw.js _site/app.js
+          printf '{"build":"%s"}\n' "${VERSION}" > _site/version.json   # die App vergleicht damit ihre eigene Version
           echo "### Sidequest Version ${VERSION}" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/configure-pages@v5

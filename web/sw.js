@@ -18,7 +18,7 @@ self.addEventListener('fetch', e => {
       const hit = await c.match(e.request); if(hit) return hit;
       const r = await fetch(e.request); if(r.ok) c.put(e.request, r.clone()); return r;
     }));
-  }else if(!url.pathname.endsWith('meta.json') && !url.pathname.endsWith('categories.json')){
+  }else if(!/\/(meta|categories|version|changelog)\.json$/.test(url.pathname)){
     e.respondWith(fetch(e.request, {cache: 'no-cache'}).then(r => { const copy = r.clone(); caches.open(SHELL).then(c => c.put(e.request, copy)); return r; })
       .catch(() => caches.match(e.request).then(m => m || (e.request.mode === 'navigate' ? caches.match('index.html') : Response.error()))));
   }

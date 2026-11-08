@@ -73,11 +73,27 @@
 <section class="sheet" id="routeSheet" role="dialog" aria-modal="true" aria-labelledby="routeSheetTitle" hidden>
   <div class="sheet-head"><h2 id="routeSheetTitle">Route planen</h2><button type="button" class="icon-btn flat" data-close aria-label="Schließen" data-icon="x"></button></div>
   <form class="sheet-body" id="routeForm" autocomplete="off">
-    <ol class="stops" id="stops"></ol>
-    <button type="button" class="text-btn" id="addStop">+ Zwischenstopp</button>
-    <label class="field">So weit dürfen Sidequests von der Route entfernt sein
-      <span class="slider"><input type="range" id="radius" min="2" max="25" value="8"><output id="radiusOut">8 km</output></span>
-    </label>
+    <div class="seg" id="modeSeg" role="group" aria-label="Art der Suche">
+      <button type="button" data-mode="route" aria-pressed="true">Route</button>
+      <button type="button" data-mode="near" aria-pressed="false">In der Nähe</button>
+    </div>
+    <fieldset class="plain" id="routeFields">
+      <ol class="stops" id="stops"></ol>
+      <button type="button" class="text-btn" id="addStop">+ Zwischenstopp</button>
+      <label class="field">So weit dürfen Sidequests von der Route entfernt sein
+        <span class="slider"><input type="range" id="radius" min="2" max="25" value="8"><output id="radiusOut">8 km</output></span>
+      </label>
+    </fieldset>
+    <fieldset class="plain" id="nearFields" disabled hidden>
+      <div class="stop-row near-row"><span class="dot" aria-hidden="true"></span>
+        <input type="text" id="nearInput" list="places" placeholder="Ort, z. B. Hannover" aria-label="Ort für den Tagesausflug" required>
+        <button type="button" class="icon-btn flat" id="nearLocate" aria-label="Mein Standort als Ort" data-icon="locate"></button>
+      </div>
+      <label class="field">So weit dürfen Sidequests vom Ort entfernt sein
+        <span class="slider"><input type="range" id="nearRadius" min="5" max="100" step="5" value="30"><output id="nearRadiusOut">30 km</output></span>
+        <span class="small-hint" id="nearTime" aria-live="polite"></span>
+      </label>
+    </fieldset>
     <p class="status" id="routeStatus" role="status"></p>
     <button type="submit" class="primary-btn" id="goBtn">Route suchen</button>
   </form>
@@ -109,6 +125,17 @@
 <section class="sheet" id="installSheet" role="dialog" aria-modal="true" aria-labelledby="installSheetTitle" hidden>
   <div class="sheet-head"><h2 id="installSheetTitle">Als App installieren</h2><button type="button" class="icon-btn flat" data-close aria-label="Schließen" data-icon="x"></button></div>
   <div class="sheet-body" id="installBody"></div>
+</section>
+
+<div class="update-bar" id="updateBar" role="status" hidden>
+  <span id="barText"></span>
+  <button type="button" class="bar-go" id="barGo"></button>
+  <button type="button" class="icon-btn flat" id="barX" aria-label="Schließen" data-icon="x"></button>
+</div>
+
+<section class="sheet" id="newsSheet" role="dialog" aria-modal="true" aria-labelledby="newsSheetTitle" hidden>
+  <div class="sheet-head"><h2 id="newsSheetTitle">Was ist neu</h2><button type="button" class="icon-btn flat" data-close aria-label="Schließen" data-icon="x"></button></div>
+  <div class="sheet-body" id="newsBody"></div>
 </section>
 
 <div id="toast" role="status" hidden></div>

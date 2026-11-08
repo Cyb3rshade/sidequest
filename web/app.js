@@ -1,4 +1,7 @@
 'use strict';
+// Version dieses Builds. Der Deploy ersetzt den Platzhalter (nicht von Hand ändern); lokal bleibt er stehen = Entwicklungsstand.
+const BUILD = '__BUILD__';
+const isDev = BUILD.startsWith('__');
 // ===================== Grundlagen =====================
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -109,6 +112,7 @@ const STAY_OPTS = [15, 30, 45, 60, 90, 120, 180, 240, 300, 360, 480];
 // ===================== Zustand =====================
 const state = {
   MAIN: [], SUB: {}, meta: null, tileSet: new Set(),
+  mode: 'route', near: {text: '', info: null, km: 30},   // mode: 'route' = entlang einer Strecke, 'near' = Tagesausflug rund um einen Ort
   stops: ['', ''], stopInfo: [null, null], radius: settings.radius * 1000,
   mains: new Set(), subs: new Set(), extras: new Set(), kw: '', maxOff: settings.radius * 1000,
   route: null, results: [], byId: new Map(), favs: store.get('af-favs', {}), tips: new Set(), favOnly: false,
@@ -130,6 +134,7 @@ function mapPadding(){
 function drawRoute(animate){
   routeLayer.clearLayers();
   const R = state.route; if(!R) return;
+  if(R.mode === 'near'){ drawNear(); return; }
   const coords = state.tour.length && state.tourRoute ? state.tourRoute.coords : R.coords;
   const a1 = cssVar('--a1'), ring = cssVar('--pinring'), line2 = cssVar('--line2');
   if(state.tour.length) L.polyline(R.coords, {color: cssVar('--muted'), weight: 3, opacity: .6, dashArray: '6 8', interactive: false}).addTo(routeLayer);
@@ -199,6 +204,99 @@ $('addStop').addEventListener('click', () => {
   const at = state.stops.length - 1; state.stops.splice(at, 0, ''); state.stopInfo.splice(at, 0, null);
   renderStops(); $('stops').querySelector(`[data-stop="${at}"]`)?.focus();
 });
+// ===================== Modus „In der Nähe“ =====================
+// Fahrzeit-Schätzung wie beim Umweg: Luftlinie, Straßenfaktor 1,3, im Schnitt 55 km/h (nur eine Richtung)
+const driveMin = km => Math.round(km * 1.3 / 55 * 60);
+const fmtMin = m => m < 60 ? `${m} min` : `${Math.floor(m/60)} h${m % 60 ? ' ' + (m % 60) + ' min' : ''}`;
+function renderNearRadius(){
+  const km = state.near.km;
+  $('nearRadius').value = km; $('nearRadiusOut').textContent = km + ' km';
+  $('nearTime').textContent = `Luftlinie, das sind etwa ${fmtMin(driveMin(km))} Fahrt`;
+}
+function setMode(mode){
+  state.mode = mode;
+  document.querySelectorAll('#modeSeg [data-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === mode));
+  const near = mode === 'near';
+  $('routeFields').hidden = near; $('routeFields').disabled = near;
+  $('nearFields').hidden = !near; $('nearFields').disabled = !near;
+  $('routeSheetTitle').textContent = near ? 'Tagesausflug planen' : 'Route planen';
+  $('goBtn').textContent = near ? 'Sidequests suchen' : 'Route suchen';
+  routeStatus('');
+  if(near){ $('nearInput').value = state.near.text; renderNearRadius(); }
+}
+$('modeSeg').addEventListener('click', e => { const b = e.target.closest('[data-mode]'); if(b) setMode(b.dataset.mode); });
+$('nearRadius').addEventListener('input', e => { state.near.km = +e.target.value; renderNearRadius(); });
+$('nearInput').addEventListener('input', e => {
+  const v = e.target.value; state.near.text = v;
+  state.near.info = sugMap.get(v) || null;   // aus der Vorschlagsliste gewählt: Koordinaten direkt übernehmen
+  if(!state.near.info) suggest(v);
+});
+$('nearLocate').addEventListener('click', () => {
+  if(!navigator.geolocation){ toast('Standort wird von diesem Browser nicht unterstützt'); return; }
+  const input = $('nearInput'); input.value = state.near.text = 'Standort wird ermittelt …'; state.near.info = null;
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const p = [pos.coords.latitude, pos.coords.longitude];
+    state.near.info = {p, label: 'Mein Standort', short: 'Mein Standort'}; input.value = state.near.text = 'Mein Standort';
+    const info = await reverseGeocode(p);
+    if(info && state.near.info?.p === p){ state.near.info = {...info, p}; input.value = state.near.text = info.label; }
+    toast('Standort übernommen');
+  }, () => { input.value = state.near.text = ''; state.near.info = null; toast('Standort nicht verfügbar'); }, {timeout: 10000, enableHighAccuracy: true});
+});
+const isNear = () => state.route?.mode === 'near';
+function drawNear(){
+  const N = state.near; if(!N.info) return;
+  const a1 = cssVar('--a1'), ring = cssVar('--pinring');
+  const c = L.circle(N.info.p, {radius: N.km * 1000, color: a1, weight: 2, opacity: .9, fillColor: a1, fillOpacity: .06, dashArray: '6 8', interactive: false}).addTo(routeLayer);
+  L.circleMarker(N.info.p, {radius: 8, color: a1, weight: 3, fillColor: ring, fillOpacity: 1}).bindTooltip(esc(N.info.short || N.text), {direction: 'top', offset: [0, -8]}).addTo(routeLayer);
+  return c;
+}
+function tilesForCircle([la, lo], radius){
+  const dLa = radius / 111320, dLo = radius / (111320 * Math.cos(la * Math.PI / 180)), out = [];
+  for(let i = Math.floor((la-dLa)*2); i <= Math.floor((la+dLa)*2); i++)
+    for(let j = Math.floor((lo-dLo)*2); j <= Math.floor((lo+dLo)*2); j++){ const id = `${i}_${j}`; if(state.tileSet.has(id)) out.push(id); }
+  return out;
+}
+async function searchNear(){
+  if(!state.meta){ routeStatus('Es sind noch keine Daten gebaut. Siehe Anleitung (README).', true); return; }
+  const N = state.near, q = N.text.trim();
+  if(!q){ routeStatus('Bitte einen Ort angeben.', true); return; }
+  $('goBtn').disabled = true;
+  try{
+    routeStatus('Ort wird gesucht …');
+    N.info = N.info || await geocode(q); N.text = N.info.label; $('nearInput').value = N.text;
+    const radius = N.km * 1000, center = N.info.p;
+    // Pseudo-Route: nur der Ort. So laufen Filter, Liste, Karte und Würfel unverändert weiter.
+    state.route = {mode: 'near', coords: [center], dist: 0, dur: 0, legEnds: [0], legDur: [], radius, points: [center]};
+    state.maxOff = radius; state.tour = []; state.tourRoute = null; state.pendingTour = null;
+    closeSheet(); routeStatus('');
+    poiCanvas.setItems([]); state.results = []; state.byId = new Map();
+    drawRoute(false);
+    map.fitBounds(L.latLng(center).toBounds(radius * 2), {...mapPadding(), animate: false});
+    setPanel('half');
+    $('listSub').textContent = 'Sidequests werden geladen …'; setProgress(0);
+    const pad = radius / 111320, padLo = radius / (111320 * Math.cos(center[0] * Math.PI / 180)), seen = new Set();
+    await loadTiles(tilesForCircle(center, radius), items => {
+      for(const [id, lat, lon, sid, t] of items){
+        if(Math.abs(lat - center[0]) > pad || Math.abs(lon - center[1]) > padLo) continue;
+        const sub = state.SUB[sid]; if(!sub) continue;
+        const key = (t.name || '') + sid + lat.toFixed(3) + lon.toFixed(3); if(seen.has(key)) continue;
+        const off = hav(center, [lat, lon]); if(off > radius) continue;
+        seen.add(key);
+        // km = Entfernung zum Ort: so sortieren und beschriften Liste, Favoriten und Detail ohne Sonderfall
+        state.results.push({id, name: t.name || '', s: sub, m: sub.m, lat, lon, off, km: off, t, mins: driveMin(off / 1000),
+          indoor: sub.place === 'in' ? true : sub.place === 'out' ? false : looksIndoor(t)});
+      }
+    });
+    state.results.sort((a, b) => a.off - b.off);
+    state.byId = new Map(state.results.map(r => [r.id, r]));
+    $('shareBtn').disabled = true;   // Teilen-Link für den Umkreis folgt in Schritt 5
+    renderTopbar(); render(true);
+    const found = visible().length;
+    if(found > LIST_LIMIT){ toast(`${found} Sidequests gefunden, grenze die Auswahl ein`); setTimeout(() => openSheet('filterSheet'), 600); }
+  }catch(err){ routeStatus(err.message, true); openSheet('routeSheet'); }
+  finally{ $('goBtn').disabled = false; setProgress(null); }
+}
+
 let sugT, sugCtl;
 function suggest(q){
   clearTimeout(sugT); if(q.trim().length < 3) return;
@@ -257,12 +355,14 @@ function routeStatus(msg, err=false){ const s = $('routeStatus'); s.textContent 
 
 async function search(ev){
   ev?.preventDefault();
+  if(state.mode === 'near') return searchNear();
   if(!state.meta){ routeStatus('Es sind noch keine Daten gebaut. Siehe Anleitung (README).', true); return; }
   const keep = state.stops.map((s, i) => [s.trim(), state.stopInfo[i]]).filter(([s]) => s);
   state.stops = keep.map(k => k[0]); state.stopInfo = keep.map(k => k[1] || null);
   if(state.stops.length < 2){ routeStatus('Bitte mindestens Start und Ziel angeben.', true); while(state.stops.length < 2){ state.stops.push(''); state.stopInfo.push(null); } renderStops(); return; }
   renderStops();
   const radius = state.radius;
+  if(isNear()) state.maxOff = radius;   // Entfernungsfilter aus dem Umkreis nicht in die Routensuche mitnehmen
   $('goBtn').disabled = true;
   try{
     routeStatus('Orte werden gesucht …');
@@ -359,8 +459,8 @@ function renderFilter(){
   if(exList.length) h += `<div class="group-label">Extras</div><div class="chips">${exList.map(x =>
     `<button type="button" class="chip" data-extra="${x.id}" aria-pressed="${state.extras.has(x.id)}">${x.label}${scope(x)}${R ? ` <span class="n">${exCount(x)}</span>` : ''}</button>`).join('')}</div>`;
   const max = R ? R.radius : state.radius;
-  const opts = [2000, 5000, 10000].filter(v => v < max).concat([max]);
-  h += `<div class="group-label">Höchstens so weit von der Route</div><div class="seg">${opts.map(v =>
+  const opts = (isNear() ? [5000, 10000, 25000, 50000] : [2000, 5000, 10000]).filter(v => v < max).concat([max]);
+  h += `<div class="group-label">Höchstens so weit ${isNear() ? 'vom Ort' : 'von der Route'}</div><div class="seg">${opts.map(v =>
     `<button type="button" data-dist="${v}" aria-pressed="${Math.min(state.maxOff, max) === v}">${v === max ? `Alle (${fmtKm(v)} km)` : fmtKm(v) + ' km'}</button>`).join('')}</div>`;
   $('filterBody').innerHTML = h;
   $('applyFilters').textContent = R ? `${visible().length} Ziele anzeigen` : 'Übernehmen';
@@ -486,11 +586,12 @@ function renderMarkers(items){
 const highlightPin = () => poiCanvas.redraw();
 function hitHtml(r){
   const inTour = state.tour.includes(r.id);
-  const meta = r.offRoute ? `${esc(r.s.label)}, nicht auf dieser Route` : `${esc(r.s.label)}, ca. +${r.mins} min`;
+  const meta = isNear() ? `${esc(r.s.label)}, ${r.offRoute ? 'nicht in diesem Umkreis' : 'ca. ' + fmtMin(r.mins) + ' Fahrt'}`
+    : r.offRoute ? `${esc(r.s.label)}, nicht auf dieser Route` : `${esc(r.s.label)}, ca. +${r.mins} min`;
   return `<li class="hit${inTour ? ' in-tour' : ''}${state.activeId === r.id ? ' active' : ''}"><span class="km">${r.km != null ? fmtKm(r.km) : ''}</span>
     <div class="hit-main"><button type="button" class="hit-open" data-open="${esc(r.id)}">${tileHtml(r.m)}
       <span class="hit-text"><strong>${esc(r.name || r.s.label)}${state.tips.has(r.id) ? ' <small style="display:inline;color:var(--a2)">Tipp</small>' : ''}</strong><small>${meta}</small></span></button>
-    ${r.offRoute ? '' : `<button type="button" class="add" data-tour="${esc(r.id)}" aria-pressed="${inTour}" aria-label="${inTour ? 'Aus der Tour entfernen' : 'Zur Tour hinzufügen'}">${icon(inTour ? 'check' : 'plus', 18, 2.3)}</button>`}</div></li>`;
+    ${r.offRoute || isNear() ? '' : `<button type="button" class="add" data-tour="${esc(r.id)}" aria-pressed="${inTour}" aria-label="${inTour ? 'Aus der Tour entfernen' : 'Zur Tour hinzufügen'}">${icon(inTour ? 'check' : 'plus', 18, 2.3)}</button>`}</div></li>`;
 }
 function favEntries(){
   return Object.values(state.favs).map(f => state.byId.get(f.id) || {...f, s: state.SUB[f.sid] || {label: ''}, m: state.SUB[f.sid]?.m || {id: 'culture'}, km: null, t: {website: f.web}, offRoute: true});
@@ -505,7 +606,7 @@ function renderList(items){
     return (tips.length ? `<div class="section-label">Tipps aus dem geteilten Link</div><ol class="road">${tips.map(hitHtml).join('')}</ol>` : '')
       + (favs.length ? `<div class="section-label">Gemerkt</div><ol class="road">${favs.map(hitHtml).join('')}</ol>` : '');
   }
-  if(!items.length) return '<p class="empty">Nichts passt zu deinen Filtern. Lockere die Filter oder plane die Route mit größerem Abstand.</p>';
+  if(!items.length) return `<p class="empty">Nichts passt zu deinen Filtern. Lockere die Filter oder ${isNear() ? 'such mit größerem Radius' : 'plane die Route mit größerem Abstand'}.</p>`;
   const out = []; let leg = 0;
   const many = items.length > LIST_LIMIT ? `<div class="many"><p style="margin:0"><b>${items.length} Sidequests</b> sind eine Menge. Grenze die Auswahl ein, dann wird es übersichtlicher.</p><button type="button" class="filter-btn" data-open-filter>${icon('filter', 18, 2.2)}Filter öffnen</button></div>` : '';
   for(const r of items.slice(0, state.listShown)){
@@ -539,7 +640,7 @@ function arrival(){
 }
 function renderTourbar(){
   const bar = $('tourbar');
-  if(!state.route){ bar.hidden = true; return; }
+  if(!state.route || isNear()){ bar.hidden = true; return; }   // Tagesausflug-Tour folgt in Schritt 4
   bar.hidden = false;
   const n = state.tour.length, T = state.tourRoute, extra = T ? Math.max(0, T.dur - state.route.dur) : 0, arr = arrival();
   bar.innerHTML = `<div class="t"><strong>${n ? `Tour mit ${n} Sidequest${n > 1 ? 's' : ''}` : 'Noch keine Sidequests'}</strong>
@@ -554,7 +655,7 @@ function render(animate=false){
   renderQuickCats();
   const R = state.route;
   $('listTitle').textContent = state.favOnly ? 'Gemerkt' : R ? `${items.length} Sidequest${items.length === 1 ? '' : 's'}` : 'Sidequests';
-  $('listSub').textContent = R ? `entlang ${fmtKm(R.dist)} km, nach Strecke sortiert` : 'Plane zuerst eine Route';
+  $('listSub').textContent = isNear() ? `im Umkreis von ${fmtKm(R.radius)} km, nach Entfernung sortiert` : R ? `entlang ${fmtKm(R.dist)} km, nach Strecke sortiert` : 'Plane zuerst eine Route';
   const rc = refineCount(); $('filterBadge').hidden = !rc; $('filterBadge').textContent = rc;
   const fc = Object.keys(state.favs).length; $('favCount').textContent = fc || '';
   $('favToggle').setAttribute('aria-pressed', state.favOnly);
@@ -564,6 +665,10 @@ function render(animate=false){
 }
 function renderTopbar(){
   const R = state.route;
+  if(isNear() && state.near.info){
+    $('routeTitle').textContent = state.near.info.short || state.near.text;
+    $('routeSub').textContent = `${state.near.km} km · ca. ${fmtMin(driveMin(state.near.km))} Fahrt`; return;
+  }
   if(!R){ $('routeTitle').textContent = 'Route planen'; $('routeSub').textContent = 'Sidequest findet Ausflugsziele unterwegs'; return; }
   const short = i => state.stopInfo[i]?.short || state.stops[i].split(',')[0];
   $('routeTitle').innerHTML = `${esc(short(0))}<span class="sep">/</span>${esc(short(state.stops.length-1))}`;
@@ -604,7 +709,8 @@ function openSheet(id){
   if(id === 'tourSheet') renderTour();
   if(id === 'settingsSheet') renderSettings();
   if(id === 'installSheet') renderInstall();
-  if(id === 'routeSheet'){ renderStops(); $('radius').value = state.radius/1000; $('radiusOut').textContent = state.radius/1000 + ' km'; }
+  if(id === 'newsSheet') renderNews();
+  if(id === 'routeSheet'){ setMode(state.mode); renderStops(); $('radius').value = state.radius/1000; $('radiusOut').textContent = state.radius/1000 + ' km'; }
   paintIcons(s);
   const scrim = $('scrim');
   if(isNarrow() || id !== 'detailSheet'){ scrim.hidden = false; requestAnimationFrame(() => scrim.classList.add('show')); }
@@ -707,7 +813,7 @@ async function weather(lat, lon){
 const findEntry = id => state.byId.get(id) || favEntries().find(f => f.id === id);
 function detailActions(r){
   const inTour = state.tour.includes(r.id), fav = !!state.favs[r.id];
-  return `${r.offRoute ? '' : `<button type="button" class="main" data-tour="${esc(r.id)}" aria-pressed="${inTour}">${icon(inTour ? 'check' : 'plus', 18, 2.3)}${inTour ? 'In deiner Tour' : 'Zur Tour'}</button>`}
+  return `${r.offRoute || isNear() ? '' : `<button type="button" class="main" data-tour="${esc(r.id)}" aria-pressed="${inTour}">${icon(inTour ? 'check' : 'plus', 18, 2.3)}${inTour ? 'In deiner Tour' : 'Zur Tour'}</button>`}
     <button type="button" class="icon-btn" data-fav="${esc(r.id)}" aria-pressed="${fav}" aria-label="${fav ? 'Nicht mehr merken' : 'Merken'}">${icon('star')}</button>
     <a class="icon-btn" href="https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lon}&travelmode=driving" target="_blank" rel="noopener" aria-label="Nur hierhin navigieren">${icon('nav')}</a>`;
 }
@@ -743,7 +849,7 @@ async function openDetail(id){
     <div class="d-body">
       <div><span class="d-cat" style="--catc:var(--c-${r.m.id})">${esc(r.s.label)}</span>
         <h2 id="detailTitle">${esc(r.name || r.s.label)}</h2>
-        <p class="d-meta">${r.km != null ? `Bei km ${fmtKm(r.km)}, ca. ${r.mins} min Umweg` : 'Nicht auf der aktuellen Route'}${r.indoor ? ', drinnen' : ''}</p></div>
+        <p class="d-meta">${isNear() ? (r.km != null ? `${fmtKm(r.km)} km Luftlinie, ca. ${fmtMin(r.mins)} Fahrt` : 'Nicht im aktuellen Umkreis') : r.km != null ? `Bei km ${fmtKm(r.km)}, ca. ${r.mins} min Umweg` : 'Nicht auf der aktuellen Route'}${r.indoor ? ', drinnen' : ''}</p></div>
       <div class="d-actions" id="dActions">${detailActions(r)}</div>
       ${foodRow}
       <div class="d-desc" id="dDesc"${t.wikipedia || t.wikidata ? '' : ' hidden'}><div class="shimmer" style="height:60px"></div></div>
@@ -787,7 +893,7 @@ function toggleTour(id){
 }
 let tourSeq = 0;
 async function updateTour(rerender = true){
-  const R = state.route; if(!R) return;
+  const R = state.route; if(!R || isNear()) return;
   const seq = ++tourSeq, wps = tourWaypoints();
   if(!state.tour.length){ state.tourRoute = {coords: R.coords, legs: R.legDur, dur: R.dur, dist: R.dist, wps}; drawRoute(false); if(rerender) render(); return; }
   state.tourBusy = true; if(rerender && state.sheet === 'tourSheet') renderTour();
@@ -902,6 +1008,48 @@ $('installBody').addEventListener('click', async e => {
   if(e.target.closest('#installNow') && installPrompt){ installPrompt.prompt(); const c = await installPrompt.userChoice; if(c.outcome !== 'accepted') toast('Installation abgebrochen'); installPrompt = null; renderInstall(); }
 });
 
+// ===================== Updates =====================
+// Der Deploy schreibt version.json (Build-Stempel). Weicht er von BUILD ab, gibt es eine neuere Version:
+// Banner „Neue Version bereit“, ein Tipp lädt die App neu (der Service Worker holt Dateien netzwerk-zuerst).
+const UPDATE_EVERY = 5 * 60e3;
+let lastCheck = 0, barAct = null, barT;
+state.update = null;
+function showBar(text, label, act, ms = 0){
+  $('barText').textContent = text; $('barGo').textContent = label; barAct = act; $('updateBar').hidden = false;
+  clearTimeout(barT); if(ms) barT = setTimeout(hideBar, ms);
+}
+const hideBar = () => { $('updateBar').hidden = true; barAct = null; clearTimeout(barT); };
+$('barGo').addEventListener('click', () => { const a = barAct; hideBar(); a?.(); });
+$('barX').addEventListener('click', hideBar);
+async function checkUpdate(manual = false){
+  if(isDev){ if(manual) toast('Entwicklungsstand: keine Update-Prüfung'); return; }
+  lastCheck = Date.now();
+  try{
+    const r = await fetch('version.json?t=' + Date.now(), {cache: 'no-store'}); if(!r.ok) throw new Error();
+    const j = await r.json();
+    if(j.build && j.build !== BUILD){
+      const fresh = state.update !== j.build; state.update = j.build;
+      if(state.sheet === 'settingsSheet'){ renderSettings(); if(manual) toast('Neue Version verfügbar'); }   // dort reicht der Knopf, der Banner würde den Titel verdecken
+      else if(fresh || manual) showBar('Neue Version bereit', 'Aktualisieren', applyUpdate);
+    }else{ state.update = null; if(manual) toast('Du hast die neueste Version'); }
+  }catch(e){ if(manual) toast('Update-Prüfung nicht möglich. Bist du online?'); }
+}
+async function applyUpdate(){
+  store.set('af-news-pending', 1);   // nach dem Neuladen auf „Was ist neu“ hinweisen
+  saveLast();
+  try{ const reg = await navigator.serviceWorker?.getRegistration(); await reg?.update(); }catch(e){}
+  location.reload();
+}
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && Date.now() - lastCheck > UPDATE_EVERY) checkUpdate(); });
+async function renderNews(){
+  const body = $('newsBody'); body.innerHTML = '<div class="shimmer" style="height:120px"></div>';
+  try{
+    const r = await fetch('changelog.json?t=' + Date.now(), {cache: 'no-store'}); if(!r.ok) throw new Error();
+    const list = (await r.json()).slice(0, 6);
+    body.innerHTML = list.map(e => `<article class="news-entry"><h3>${esc(e.title)}</h3>${/^\d{4}-\d{2}-\d{2}$/.test(e.id) ? `<time datetime="${e.id}">${new Date(e.id).toLocaleDateString('de-DE', {day: 'numeric', month: 'long', year: 'numeric'})}</time>` : ''}<ul>${e.items.map(i => `<li>${esc(i)}</li>`).join('')}</ul></article>`).join('');
+  }catch(e){ body.innerHTML = '<p class="empty">Die Neuigkeiten lassen sich gerade nicht laden. Bist du online?</p>'; }
+}
+
 // ===================== Einstellungen =====================
 function renderSettings(){
   const sw = (id, on, label) => `<button type="button" class="switch" role="switch" id="${id}" aria-checked="${on}" aria-label="${label}"></button>`;
@@ -925,6 +1073,12 @@ function renderSettings(){
       <div class="set-row"><div class="t"><b>Kartendaten</b><small>OpenStreetMap, ${esc(meta)}</small></div></div>
       <div class="set-row"><div class="t"><b>Merkliste leeren</b><small>${Object.keys(state.favs).length} gemerkte Ziele auf diesem Gerät</small></div><button type="button" class="secondary-btn" style="flex:none;padding:0 14px" id="clearFavs">Leeren</button></div>
     </div>
+    <div class="group-label">App</div>
+    <div class="set-group">
+      <div class="set-row"><div class="t"><b>Version</b><small>${isDev ? 'Entwicklungsstand' : esc(BUILD)}${state.update ? ', neuere Version verfügbar' : ''}</small></div>
+        <button type="button" class="secondary-btn" style="flex:none;padding:0 14px" id="${state.update ? 'doUpdate' : 'checkUpdate'}">${state.update ? 'Aktualisieren' : 'Nach Updates suchen'}</button></div>
+      <div class="set-row"><div class="t"><b>Was ist neu</b><small>Die letzten Änderungen an Sidequest</small></div><button type="button" class="secondary-btn" style="flex:none;padding:0 14px" id="openNews">Ansehen</button></div>
+    </div>
     <div class="group-label">Datenquellen und Lizenzen</div>
     <div class="set-group">
       <div class="set-row"><div class="t"><b>Karte und Ziele</b><small>© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>-Mitwirkende, Lizenz <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener">ODbL</a>. Kartenkacheln von der OpenStreetMap Foundation</small></div></div>
@@ -941,6 +1095,9 @@ function renderSettings(){
 $('settingsBody').addEventListener('click', e => {
   const th = e.target.closest('[data-theme-set]');
   if(th){ settings.theme = th.dataset.themeSet; saveSettings(); applyTheme(); renderSettings(); render(); return; }
+  if(e.target.id === 'checkUpdate'){ checkUpdate(true); return; }
+  if(e.target.id === 'doUpdate'){ applyUpdate(); return; }
+  if(e.target.id === 'openNews'){ openSheet('newsSheet'); return; }
   if(e.target.id === 'setStay'){ settings.stay = !settings.stay; saveSettings(); renderSettings(); renderTourbar(); return; }
   if(e.target.id === 'setNamed'){ settings.named = !settings.named; saveSettings(); renderSettings(); render(); return; }
   if(e.target.id === 'clearFavs' && Object.keys(state.favs).length && confirm('Alle gemerkten Ziele auf diesem Gerät löschen?')){ state.favs = {}; store.set('af-favs', {}); renderSettings(); render(); toast('Merkliste geleert'); }
@@ -966,10 +1123,10 @@ function shareParams(withTips){
 // Letzte Route merken: Wer die App versehentlich schließt (oder kurz in eine andere App wechselt), findet seine Route beim Zurückkommen wieder.
 // Gespeichert wird nur die Anfrage (Orte, Filter, Tour), nicht das Ergebnis. Die Route wird beim Start neu berechnet, die Daten kommen aus dem Cache.
 const LAST_KEY = 'af-last', LAST_HOURS = 12;
-function saveLast(){ if(state.route) store.set(LAST_KEY, {t: Date.now(), h: shareParams(false).toString()}); }
+function saveLast(){ if(state.route && !isNear()) store.set(LAST_KEY, {t: Date.now(), h: shareParams(false).toString()}); }
 document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'hidden') saveLast(); });
 addEventListener('pagehide', saveLast);
-const syncHash = () => { history.replaceState(null, '', '#' + shareParams(false).toString()); saveLast(); };
+const syncHash = () => { if(isNear()) return; history.replaceState(null, '', '#' + shareParams(false).toString()); saveLast(); };
 function readHash(){
   const p = new URLSearchParams(location.hash.slice(1)); if(!p.get('s')) return false;
   state.stops = p.get('s').split('|');
@@ -1037,5 +1194,7 @@ document.addEventListener('click', e => {
   renderStops(); render(); setPanel(isNarrow() ? 'peek' : 'half');
   if(restored) toast('Deine letzte Route wird wiederhergestellt …');
   if(fromLink) search(); else openSheet('routeSheet');
+  if(store.get('af-news-pending', 0)){ store.set('af-news-pending', null); showBar(isDev ? 'App aktualisiert' : `Aktualisiert auf ${BUILD}`, 'Was ist neu', () => openSheet('newsSheet'), 15000); }
+  setTimeout(checkUpdate, 3000);
   if('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
