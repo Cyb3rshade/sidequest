@@ -154,6 +154,13 @@ svg.i{display:block;flex:none}
 .stop-row:not(:last-child)::after{content:"";position:absolute;left:6px;top:50%;height:calc(100% + 8px);width:2px;background:var(--line2)}
 input[type=text],input[type=search],input[type=time],select{width:100%;min-height:46px;border-radius:12px;border:1px solid var(--line2);background:var(--raise);padding:10px 12px;color:var(--text)}
 input:focus,select:focus{outline:none;border-color:var(--a1);box-shadow:0 0 0 3px color-mix(in srgb,var(--a1) 25%,transparent)}
+fieldset.plain{border:0;margin:0;padding:0;min-width:0}
+fieldset.plain[hidden]{display:none}
+#modeSeg{margin-bottom:14px}
+.near-row{grid-template-columns:18px 1fr auto}
+.near-row .dot{width:14px;height:14px}
+.near-row::after{display:none}
+.small-hint{font-size:14px;color:var(--muted)}
 .field{display:grid;gap:6px;font-size:14px;color:var(--muted);margin:14px 0}
 .slider{display:flex;align-items:center;gap:12px}
 .slider input{flex:1;accent-color:var(--a1)}

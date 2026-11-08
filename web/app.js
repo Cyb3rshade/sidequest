@@ -109,6 +109,7 @@ const STAY_OPTS = [15, 30, 45, 60, 90, 120, 180, 240, 300, 360, 480];
 // ===================== Zustand =====================
 const state = {
   MAIN: [], SUB: {}, meta: null, tileSet: new Set(),
+  mode: 'route', near: {text: '', info: null, km: 30},   // mode: 'route' = entlang einer Strecke, 'near' = Tagesausflug rund um einen Ort
   stops: ['', ''], stopInfo: [null, null], radius: settings.radius * 1000,
   mains: new Set(), subs: new Set(), extras: new Set(), kw: '', maxOff: settings.radius * 1000,
   route: null, results: [], byId: new Map(), favs: store.get('af-favs', {}), tips: new Set(), favOnly: false,
@@ -199,6 +200,69 @@ $('addStop').addEventListener('click', () => {
   const at = state.stops.length - 1; state.stops.splice(at, 0, ''); state.stopInfo.splice(at, 0, null);
   renderStops(); $('stops').querySelector(`[data-stop="${at}"]`)?.focus();
 });
+// ===================== Modus „In der Nähe“ =====================
+// Fahrzeit-Schätzung wie beim Umweg: Luftlinie, Straßenfaktor 1,3, im Schnitt 55 km/h (nur eine Richtung)
+const driveMin = km => Math.round(km * 1.3 / 55 * 60);
+const fmtMin = m => m < 60 ? `${m} min` : `${Math.floor(m/60)} h${m % 60 ? ' ' + (m % 60) + ' min' : ''}`;
+function renderNearRadius(){
+  const km = state.near.km;
+  $('nearRadius').value = km; $('nearRadiusOut').textContent = km + ' km';
+  $('nearTime').textContent = `Luftlinie, das sind etwa ${fmtMin(driveMin(km))} Fahrt`;
+}
+function setMode(mode){
+  state.mode = mode;
+  document.querySelectorAll('#modeSeg [data-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === mode));
+  const near = mode === 'near';
+  $('routeFields').hidden = near; $('routeFields').disabled = near;
+  $('nearFields').hidden = !near; $('nearFields').disabled = !near;
+  $('routeSheetTitle').textContent = near ? 'Tagesausflug planen' : 'Route planen';
+  $('goBtn').textContent = near ? 'Sidequests suchen' : 'Route suchen';
+  routeStatus('');
+  if(near){ $('nearInput').value = state.near.text; renderNearRadius(); }
+}
+$('modeSeg').addEventListener('click', e => { const b = e.target.closest('[data-mode]'); if(b) setMode(b.dataset.mode); });
+$('nearRadius').addEventListener('input', e => { state.near.km = +e.target.value; renderNearRadius(); });
+$('nearInput').addEventListener('input', e => {
+  const v = e.target.value; state.near.text = v;
+  state.near.info = sugMap.get(v) || null;   // aus der Vorschlagsliste gewählt: Koordinaten direkt übernehmen
+  if(!state.near.info) suggest(v);
+});
+$('nearLocate').addEventListener('click', () => {
+  if(!navigator.geolocation){ toast('Standort wird von diesem Browser nicht unterstützt'); return; }
+  const input = $('nearInput'); input.value = state.near.text = 'Standort wird ermittelt …'; state.near.info = null;
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const p = [pos.coords.latitude, pos.coords.longitude];
+    state.near.info = {p, label: 'Mein Standort', short: 'Mein Standort'}; input.value = state.near.text = 'Mein Standort';
+    const info = await reverseGeocode(p);
+    if(info && state.near.info?.p === p){ state.near.info = {...info, p}; input.value = state.near.text = info.label; }
+    toast('Standort übernommen');
+  }, () => { input.value = state.near.text = ''; state.near.info = null; toast('Standort nicht verfügbar'); }, {timeout: 10000, enableHighAccuracy: true});
+});
+const nearLayer = L.layerGroup().addTo(map);
+function drawNear(){
+  nearLayer.clearLayers();
+  const N = state.near; if(state.mode !== 'near' || !N.info) return;
+  const a1 = cssVar('--a1'), ring = cssVar('--pinring');
+  const c = L.circle(N.info.p, {radius: N.km * 1000, color: a1, weight: 2, opacity: .9, fillColor: a1, fillOpacity: .06, dashArray: '6 8', interactive: false}).addTo(nearLayer);
+  L.circleMarker(N.info.p, {radius: 8, color: a1, weight: 3, fillColor: ring, fillOpacity: 1}).bindTooltip(esc(N.info.short || N.text), {direction: 'top', offset: [0, -8]}).addTo(nearLayer);
+  return c;
+}
+async function searchNear(){
+  const N = state.near, q = N.text.trim();
+  if(!q){ routeStatus('Bitte einen Ort angeben.', true); return; }
+  $('goBtn').disabled = true;
+  try{
+    routeStatus('Ort wird gesucht …');
+    N.info = N.info || await geocode(q); N.text = N.info.label; $('nearInput').value = N.text;
+    routeStatus(''); closeSheet();
+    routeLayer.clearLayers();
+    const c = drawNear();
+    map.fitBounds(c.getBounds(), {...mapPadding(), animate: false});
+    renderTopbar();
+  }catch(err){ routeStatus(err.message, true); }
+  finally{ $('goBtn').disabled = false; }
+}
+
 let sugT, sugCtl;
 function suggest(q){
   clearTimeout(sugT); if(q.trim().length < 3) return;
@@ -257,6 +321,7 @@ function routeStatus(msg, err=false){ const s = $('routeStatus'); s.textContent 
 
 async function search(ev){
   ev?.preventDefault();
+  if(state.mode === 'near') return searchNear();
   if(!state.meta){ routeStatus('Es sind noch keine Daten gebaut. Siehe Anleitung (README).', true); return; }
   const keep = state.stops.map((s, i) => [s.trim(), state.stopInfo[i]]).filter(([s]) => s);
   state.stops = keep.map(k => k[0]); state.stopInfo = keep.map(k => k[1] || null);
@@ -564,6 +629,10 @@ function render(animate=false){
 }
 function renderTopbar(){
   const R = state.route;
+  if(state.mode === 'near' && state.near.info){
+    $('routeTitle').textContent = state.near.info.short || state.near.text;
+    $('routeSub').textContent = `${state.near.km} km · ca. ${fmtMin(driveMin(state.near.km))} Fahrt`; return;
+  }
   if(!R){ $('routeTitle').textContent = 'Route planen'; $('routeSub').textContent = 'Sidequest findet Ausflugsziele unterwegs'; return; }
   const short = i => state.stopInfo[i]?.short || state.stops[i].split(',')[0];
   $('routeTitle').innerHTML = `${esc(short(0))}<span class="sep">/</span>${esc(short(state.stops.length-1))}`;
@@ -604,7 +673,7 @@ function openSheet(id){
   if(id === 'tourSheet') renderTour();
   if(id === 'settingsSheet') renderSettings();
   if(id === 'installSheet') renderInstall();
-  if(id === 'routeSheet'){ renderStops(); $('radius').value = state.radius/1000; $('radiusOut').textContent = state.radius/1000 + ' km'; }
+  if(id === 'routeSheet'){ setMode(state.mode); renderStops(); $('radius').value = state.radius/1000; $('radiusOut').textContent = state.radius/1000 + ' km'; }
   paintIcons(s);
   const scrim = $('scrim');
   if(isNarrow() || id !== 'detailSheet'){ scrim.hidden = false; requestAnimationFrame(() => scrim.classList.add('show')); }
