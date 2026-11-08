@@ -26,6 +26,8 @@ web/                          wird 1:1 veröffentlicht
   app.js                      gesamte App-Logik, in kommentierte Abschnitte gegliedert
   style.css                   Themes, Layouts, Komponenten
   categories.json             EINZIGE Quelle für Kategorien (Build und App)
+  changelog.json              „Was ist neu“: [{id: Datum, title, items[]}], neueste zuerst, von Hand gepflegt
+  version.json                entsteht erst im Deploy: {"build": "JJJJ.MM.TT-<Lauf>"}, nicht im Repo
   sw.js                       Service Worker (Offline-Cache, Cache-Name mit __BUILD__)
   manifest.webmanifest        PWA-Manifest
   icon*.png, icon.svg, apple-touch-icon.png, favicon-32.png
@@ -54,7 +56,10 @@ web/                          wird 1:1 veröffentlicht
 - Layout nach Breite, nicht nach Gerät: unter 760 px Karte vollflächig mit ziehbarem Panel (peek/half/full), ab 760 px Liste links und Karte rechts, ab 1100 px zusätzlich Kategorie-Chips sichtbar. `(hover:hover)` steuert Hover-Effekte und Tooltips.
 - Themes: `data-theme="light"|"dark"` auf `<html>`, Einstellung Hell, Dunkel oder Automatisch. Kartenkacheln werden per CSS-Filter grau bzw. dunkel. Kategoriefarben als `--c-<oberkategorie>` (Schrift darauf `--o-<…>`).
 - Teilen per URL-Hash: `s` Stopps, `c` Koordinaten, `r` Korridor, `m` Oberkategorien, `u` Unterkategorien, `x` Extras, `k` Stichwort, `t` Tipps (Merkliste), `w` Tour.
-- Service Worker: App-Dateien netzwerk-zuerst, Kacheln cache-zuerst (URL mit `?v=<built>`), `meta.json` und `categories.json` nie aus dem Cache. Der Cache-Name `af-shell-__BUILD__` wird im Deploy gestempelt (nie von Hand hochzählen), beim Aktivieren löscht der Service Worker alte `af-shell-*`-Caches. Neue Dateien, die offline gebraucht werden, in `FILES` in `sw.js` eintragen.
+- Updates: `BUILD` (oben in `app.js`) ist die Version dieses Builds, der Deploy ersetzt `__BUILD__` in `app.js` und `sw.js` und schreibt `version.json`. `checkUpdate()` vergleicht beim Start (nach 3 s), beim Zurückkehren in die App (höchstens alle 5 min) und per Knopf in den Einstellungen. Weicht der Stempel ab: Banner „Neue Version bereit“, `applyUpdate()` lädt neu und zeigt danach einmal „Aktualisiert auf …“ mit Link zu „Was ist neu“ (Schlüssel `af-news-pending`). Lokal (Platzhalter unverändert) ist die Prüfung aus. `__BUILD__` in `app.js` darf nur einmal vorkommen (Deklaration), sonst wirkt der Stempel auch auf Vergleiche.
+- **Changelog-Regel:** Jede Änderung, die Nutzer merken, bekommt einen Eintrag in `changelog.json` (neueste zuerst, im selben Commit).
+- Modus „In der Nähe“ (Tagesausflug): Umschalter im Routen-Sheet. `searchNear()` baut eine Pseudo-Route `state.route = {mode:'near', points:[Ort], radius, …}` (`isNear()`), damit Filter, Liste, Karte und Würfel unverändert laufen. `km` und `off` eines Ziels sind die Luftlinie zum Ort, Fahrzeit = `driveMin()` (Luftlinie × 1,3, 55 km/h, eine Richtung). Tour, Teilen-Link und `af-last` gelten noch nur für Routen, der Umkreis bekommt sie in den nächsten Schritten.
+- Service Worker: App-Dateien netzwerk-zuerst, Kacheln cache-zuerst (URL mit `?v=<built>`), `meta.json`, `categories.json`, `version.json` und `changelog.json` nie aus dem Cache. Der Cache-Name `af-shell-__BUILD__` wird im Deploy gestempelt (nie von Hand hochzählen), beim Aktivieren löscht der Service Worker alte `af-shell-*`-Caches. Neue Dateien, die offline gebraucht werden, in `FILES` in `sw.js` eintragen.
 
 ## Datenquellen und APIs
 
@@ -128,4 +133,4 @@ Nach dem Deploy: GitHub Pages hält Dateien bis zu 10 Minuten im Cache. Installi
 ## Offene Abweichungen von den gemeinsamen Regeln
 
 - `web/style.css` definiert die Farb-Tokens noch selbst und nutzt `cybershade.css` aus dem Kit nicht. Schrittweise auf die Variablen aus dem Kit umstellen, App-Spezifisches (Kategoriefarben, Layout) bleibt in `style.css`.
-- Offen aus der Übergabe: Update-Hinweis mit Changelog, „Geöffnet bei Ankunft“, echte Umweg-Minuten, Rundtour, Ladestationen, Lieblingsfilter.
+- Offen aus der Übergabe: „Geöffnet bei Ankunft“, echte Umweg-Minuten, Rundtour, Ladestationen, Lieblingsfilter.

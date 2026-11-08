@@ -1,4 +1,7 @@
 'use strict';
+// Version dieses Builds. Der Deploy ersetzt den Platzhalter (nicht von Hand ändern); lokal bleibt er stehen = Entwicklungsstand.
+const BUILD = '__BUILD__';
+const isDev = BUILD.startsWith('__');
 // ===================== Grundlagen =====================
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -706,6 +709,7 @@ function openSheet(id){
   if(id === 'tourSheet') renderTour();
   if(id === 'settingsSheet') renderSettings();
   if(id === 'installSheet') renderInstall();
+  if(id === 'newsSheet') renderNews();
   if(id === 'routeSheet'){ setMode(state.mode); renderStops(); $('radius').value = state.radius/1000; $('radiusOut').textContent = state.radius/1000 + ' km'; }
   paintIcons(s);
   const scrim = $('scrim');
@@ -1004,6 +1008,48 @@ $('installBody').addEventListener('click', async e => {
   if(e.target.closest('#installNow') && installPrompt){ installPrompt.prompt(); const c = await installPrompt.userChoice; if(c.outcome !== 'accepted') toast('Installation abgebrochen'); installPrompt = null; renderInstall(); }
 });
 
+// ===================== Updates =====================
+// Der Deploy schreibt version.json (Build-Stempel). Weicht er von BUILD ab, gibt es eine neuere Version:
+// Banner „Neue Version bereit“, ein Tipp lädt die App neu (der Service Worker holt Dateien netzwerk-zuerst).
+const UPDATE_EVERY = 5 * 60e3;
+let lastCheck = 0, barAct = null, barT;
+state.update = null;
+function showBar(text, label, act, ms = 0){
+  $('barText').textContent = text; $('barGo').textContent = label; barAct = act; $('updateBar').hidden = false;
+  clearTimeout(barT); if(ms) barT = setTimeout(hideBar, ms);
+}
+const hideBar = () => { $('updateBar').hidden = true; barAct = null; clearTimeout(barT); };
+$('barGo').addEventListener('click', () => { const a = barAct; hideBar(); a?.(); });
+$('barX').addEventListener('click', hideBar);
+async function checkUpdate(manual = false){
+  if(isDev){ if(manual) toast('Entwicklungsstand: keine Update-Prüfung'); return; }
+  lastCheck = Date.now();
+  try{
+    const r = await fetch('version.json?t=' + Date.now(), {cache: 'no-store'}); if(!r.ok) throw new Error();
+    const j = await r.json();
+    if(j.build && j.build !== BUILD){
+      const fresh = state.update !== j.build; state.update = j.build;
+      if(state.sheet === 'settingsSheet'){ renderSettings(); if(manual) toast('Neue Version verfügbar'); }   // dort reicht der Knopf, der Banner würde den Titel verdecken
+      else if(fresh || manual) showBar('Neue Version bereit', 'Aktualisieren', applyUpdate);
+    }else{ state.update = null; if(manual) toast('Du hast die neueste Version'); }
+  }catch(e){ if(manual) toast('Update-Prüfung nicht möglich. Bist du online?'); }
+}
+async function applyUpdate(){
+  store.set('af-news-pending', 1);   // nach dem Neuladen auf „Was ist neu“ hinweisen
+  saveLast();
+  try{ const reg = await navigator.serviceWorker?.getRegistration(); await reg?.update(); }catch(e){}
+  location.reload();
+}
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && Date.now() - lastCheck > UPDATE_EVERY) checkUpdate(); });
+async function renderNews(){
+  const body = $('newsBody'); body.innerHTML = '<div class="shimmer" style="height:120px"></div>';
+  try{
+    const r = await fetch('changelog.json?t=' + Date.now(), {cache: 'no-store'}); if(!r.ok) throw new Error();
+    const list = (await r.json()).slice(0, 6);
+    body.innerHTML = list.map(e => `<article class="news-entry"><h3>${esc(e.title)}</h3>${/^\d{4}-\d{2}-\d{2}$/.test(e.id) ? `<time datetime="${e.id}">${new Date(e.id).toLocaleDateString('de-DE', {day: 'numeric', month: 'long', year: 'numeric'})}</time>` : ''}<ul>${e.items.map(i => `<li>${esc(i)}</li>`).join('')}</ul></article>`).join('');
+  }catch(e){ body.innerHTML = '<p class="empty">Die Neuigkeiten lassen sich gerade nicht laden. Bist du online?</p>'; }
+}
+
 // ===================== Einstellungen =====================
 function renderSettings(){
   const sw = (id, on, label) => `<button type="button" class="switch" role="switch" id="${id}" aria-checked="${on}" aria-label="${label}"></button>`;
@@ -1027,6 +1073,12 @@ function renderSettings(){
       <div class="set-row"><div class="t"><b>Kartendaten</b><small>OpenStreetMap, ${esc(meta)}</small></div></div>
       <div class="set-row"><div class="t"><b>Merkliste leeren</b><small>${Object.keys(state.favs).length} gemerkte Ziele auf diesem Gerät</small></div><button type="button" class="secondary-btn" style="flex:none;padding:0 14px" id="clearFavs">Leeren</button></div>
     </div>
+    <div class="group-label">App</div>
+    <div class="set-group">
+      <div class="set-row"><div class="t"><b>Version</b><small>${isDev ? 'Entwicklungsstand' : esc(BUILD)}${state.update ? ', neuere Version verfügbar' : ''}</small></div>
+        <button type="button" class="secondary-btn" style="flex:none;padding:0 14px" id="${state.update ? 'doUpdate' : 'checkUpdate'}">${state.update ? 'Aktualisieren' : 'Nach Updates suchen'}</button></div>
+      <div class="set-row"><div class="t"><b>Was ist neu</b><small>Die letzten Änderungen an Sidequest</small></div><button type="button" class="secondary-btn" style="flex:none;padding:0 14px" id="openNews">Ansehen</button></div>
+    </div>
     <div class="group-label">Datenquellen und Lizenzen</div>
     <div class="set-group">
       <div class="set-row"><div class="t"><b>Karte und Ziele</b><small>© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>-Mitwirkende, Lizenz <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener">ODbL</a>. Kartenkacheln von der OpenStreetMap Foundation</small></div></div>
@@ -1043,6 +1095,9 @@ function renderSettings(){
 $('settingsBody').addEventListener('click', e => {
   const th = e.target.closest('[data-theme-set]');
   if(th){ settings.theme = th.dataset.themeSet; saveSettings(); applyTheme(); renderSettings(); render(); return; }
+  if(e.target.id === 'checkUpdate'){ checkUpdate(true); return; }
+  if(e.target.id === 'doUpdate'){ applyUpdate(); return; }
+  if(e.target.id === 'openNews'){ openSheet('newsSheet'); return; }
   if(e.target.id === 'setStay'){ settings.stay = !settings.stay; saveSettings(); renderSettings(); renderTourbar(); return; }
   if(e.target.id === 'setNamed'){ settings.named = !settings.named; saveSettings(); renderSettings(); render(); return; }
   if(e.target.id === 'clearFavs' && Object.keys(state.favs).length && confirm('Alle gemerkten Ziele auf diesem Gerät löschen?')){ state.favs = {}; store.set('af-favs', {}); renderSettings(); render(); toast('Merkliste geleert'); }
@@ -1139,5 +1194,7 @@ document.addEventListener('click', e => {
   renderStops(); render(); setPanel(isNarrow() ? 'peek' : 'half');
   if(restored) toast('Deine letzte Route wird wiederhergestellt …');
   if(fromLink) search(); else openSheet('routeSheet');
+  if(store.get('af-news-pending', 0)){ store.set('af-news-pending', null); showBar(isDev ? 'App aktualisiert' : `Aktualisiert auf ${BUILD}`, 'Was ist neu', () => openSheet('newsSheet'), 15000); }
+  setTimeout(checkUpdate, 3000);
   if('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

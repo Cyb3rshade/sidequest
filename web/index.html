@@ -127,6 +127,17 @@
   <div class="sheet-body" id="installBody"></div>
 </section>
 
+<div class="update-bar" id="updateBar" role="status" hidden>
+  <span id="barText"></span>
+  <button type="button" class="bar-go" id="barGo"></button>
+  <button type="button" class="icon-btn flat" id="barX" aria-label="Schließen" data-icon="x"></button>
+</div>
+
+<section class="sheet" id="newsSheet" role="dialog" aria-modal="true" aria-labelledby="newsSheetTitle" hidden>
+  <div class="sheet-head"><h2 id="newsSheetTitle">Was ist neu</h2><button type="button" class="icon-btn flat" data-close aria-label="Schließen" data-icon="x"></button></div>
+  <div class="sheet-body" id="newsBody"></div>
+</section>
+
 <div id="toast" role="status" hidden></div>
 
 <script src="vendor/leaflet/leaflet.js"></script>

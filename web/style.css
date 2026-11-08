@@ -284,6 +284,16 @@ fieldset.plain[hidden]{display:none}
 .leaflet-tooltip{background:var(--surf);color:var(--text);border:0;border-radius:8px;box-shadow:var(--shadow);font:600 13px "Archivo",sans-serif}
 .leaflet-tooltip-top::before{border-top-color:var(--surf)}
 
+.update-bar{position:fixed;z-index:1150;left:12px;right:12px;top:calc(76px + env(safe-area-inset-top,0px));display:flex;align-items:center;gap:8px;padding:8px 8px 8px 16px;border-radius:16px;background:var(--text);color:var(--surf);font-size:14px;box-shadow:0 6px 24px rgba(0,0,0,.28);animation:barIn .25s var(--ease)}
+@keyframes barIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+.update-bar[hidden]{display:none}
+.update-bar span{flex:1;font-weight:600}
+.update-bar .bar-go{flex:none;min-height:44px;padding:0 16px;border:0;border-radius:12px;background:var(--surf);color:var(--text);font-weight:700;font-size:14px}
+.update-bar .icon-btn{color:var(--surf);flex:none;background:transparent;border:0;box-shadow:none}
+.news-entry + .news-entry{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
+.news-entry h3{margin:0 0 6px;font-size:17px}
+.news-entry time{display:block;font-size:13px;color:var(--muted);margin-bottom:8px}
+.news-entry ul{margin:0;padding-left:20px;display:grid;gap:6px}
 #toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:1200;background:var(--text);color:var(--surf);padding:10px 16px;border-radius:999px;font-size:14px;max-width:90vw;animation:toastIn .3s var(--ease)}
 @keyframes toastIn{from{opacity:0;transform:translate(-50%,10px)}}
 
@@ -299,6 +309,7 @@ fieldset.plain[hidden]{display:none}
 /* ===== Ab Tablet: Kopfleiste oben, Liste links, Karte rechts ===== */
 @media (min-width:760px){
   :root{--panel-w:360px}
+  .update-bar{left:auto;right:16px;top:calc(var(--top) + 12px);width:min(440px,calc(100vw - 32px))}
   .topbar{top:0;left:0;right:0;padding:12px 16px;background:var(--surf);border-bottom:1px solid var(--line);height:var(--top)}
   .route-pill{box-shadow:none;background:var(--raise);border-color:transparent;padding:6px 6px 6px 16px;max-width:720px}
   .route-pill .pill-icon{background:var(--surf);height:38px}
